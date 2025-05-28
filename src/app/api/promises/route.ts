@@ -3,59 +3,78 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { createClient } from '@/lib/supabase/server';
 import type { UserPromise, Tag } from '@/types';
-import type { Database } from '@/types/supabase';
+import type { Database, Enums as SupabaseEnums } from '@/types/supabase'; // Added SupabaseEnums
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createErrorResponse } from '@/lib/api-utils';
 import { ITEMS_PER_PAGE } from '@/lib/constants';
 import { fetchEntityData } from '@/lib/data-fetcher';
 import { handleCreatePromise } from '@/lib/api-handlers/promise-handlers';
 import { AppError } from '@/lib/error-handling';
-import { promiseFormSchema } from '@/components/admin/promise-form';
-
+// import { promiseFormSchema } from '@/components/admin/promise-form'; // Not used in this file directly
 
 type RawSupabasePromise = Database['public']['Tables']['promises']['Row'] & {
-  politicians: (Pick<Database['public']['Tables']['politicians']['Row'], 'id' | 'name' | 'image_url' | 'party_id'> & {
-    party_details: Pick<Database['public']['Tables']['parties']['Row'], 'id' | 'name' | 'logo_url'> | null;
+  politicians: (Omit<Database['public']['Tables']['politicians']['Row'], 'party_id'> & {
+    party_memberships: {
+      is_active: boolean;
+      party: {
+        id: number;
+        name: string;
+        logo_asset_id: number | null;
+        logo_details: { storage_path: string | null } | null;
+      } | null;
+    }[] | null;
   }) | null;
-  parties: Pick<Database['public']['Tables']['parties']['Row'], 'id' | 'name' | 'logo_url'> | null;
-  promise_tags: Array<{
-    tags: Pick<Database['public']['Tables']['tags']['Row'], 'id' | 'name' | 'created_at'> | null;
-  }>;
+  parties: (Pick<Database['public']['Tables']['parties']['Row'], 'id' | 'name' | 'logo_asset_id'> & {
+    logo_details: { storage_path: string | null } | null;
+  }) | null;
+  // promise_tags is removed, replaced by entity_tags
+  entity_tags: {
+    tag_id: number;
+    entity_type: SupabaseEnums<'entity_type'>; // Using the enum type for entity_type
+    tag: { 
+      id: number; 
+      name: string; 
+      created_at: string | null; 
+    } | null; 
+  }[] | null;
 };
 
 export function transformSupabasePromiseToApp(raw: RawSupabasePromise): UserPromise {
-  let politicianPartyId: string | undefined | null = undefined;
-  let politicianPartyName: string | undefined | null = undefined;
-  let politicianPartyLogoUrl: string | undefined | null = undefined;
+  let politicianPartyId: string | undefined = undefined;
+  let politicianPartyName: string | undefined = undefined;
+  let politicianPartyLogoUrl: string | undefined = undefined;
 
-  if (raw.politicians) {
-    politicianPartyId = raw.politicians.party_id || undefined;
-    if (raw.politicians.party_details) {
-      politicianPartyName = raw.politicians.party_details.name;
-      politicianPartyLogoUrl = raw.politicians.party_details.logo_url;
+  if (raw.politicians && raw.politicians.party_memberships) {
+    const activeMembership = raw.politicians.party_memberships.find(
+      (mem) => mem.is_active && mem.party
+    );
+    if (activeMembership && activeMembership.party) {
+      politicianPartyId = activeMembership.party.id.toString();
+      politicianPartyName = activeMembership.party.name;
+      politicianPartyLogoUrl = activeMembership.party.logo_details?.storage_path || undefined;
     }
   }
 
   return {
-    id: raw.id,
+    id: raw.id.toString(), // Changed to string
     title: raw.title,
     description: raw.description,
     status: raw.status as UserPromise['status'],
-    category: raw.category,
+    category: undefined, // Set to undefined as category column is removed
     deadline: raw.deadline,
     sourceUrl: raw.source_url,
     evidenceUrl: raw.evidence_url,
     dateAdded: raw.date_added,
-    politicianId: raw.politicians?.id || undefined,
+    politicianId: raw.politicians?.id?.toString() || undefined, // Changed to string
     politicianName: raw.politicians?.name || undefined,
     politicianImageUrl: raw.politicians?.image_url || undefined,
-    partyId: raw.politicians ? politicianPartyId : raw.parties?.id,
-    partyName: raw.politicians ? politicianPartyName : raw.parties?.name,
-    partyLogoUrl: raw.politicians ? politicianPartyLogoUrl : raw.parties?.logo_url,
+    
+    partyId: raw.politicians ? politicianPartyId : (raw.parties?.id?.toString() || undefined),
+    partyName: raw.politicians ? politicianPartyName : (raw.parties?.name || undefined),
+    partyLogoUrl: raw.politicians ? politicianPartyLogoUrl : (raw.parties?.logo_details?.storage_path || undefined),
+    
     isFeatured: raw.is_featured ?? false,
-    tags: raw.promise_tags
-      ?.map(pt => pt.tags ? { id: pt.tags.id, name: pt.tags.name, created_at: pt.tags.created_at } : null)
-      .filter(Boolean) as Tag[] || [],
+    tags: raw.entity_tags?.map(et => et.tag ? { id: et.tag.id.toString(), name: et.tag.name, created_at: et.tag.created_at || undefined } : null).filter(Boolean) as Tag[] || [],
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   };
@@ -74,7 +93,7 @@ export async function GET(request: NextRequest) {
     const filters: Record<string, any> = {
         searchTerm: searchParams.get('search'),
         status: searchParams.get('status'),
-        category: searchParams.get('category'),
+        // category: searchParams.get('category'), // Category filter removed
         politicianId: searchParams.get('politician'),
         partyId: searchParams.get('party'),
         tag: searchParams.get('tag'),
@@ -85,6 +104,7 @@ export async function GET(request: NextRequest) {
     let sortBy;
     if (sortByParam) {
         const [field, order] = sortByParam.split('_');
+        // Category sorting removed in data-fetcher, no specific check needed here for that.
         sortBy = { field, order: order as 'asc' | 'desc' };
     }
 
@@ -114,6 +134,7 @@ export async function POST(request: NextRequest) {
     const supabase = createClient(cookieStore);
     try {
         const json = await request.json();
+        // Assuming promiseFormSchema is used within handleCreatePromise for validation
         const newPromise = await handleCreatePromise(json, supabase);
         return NextResponse.json(newPromise, { status: 201 });
 
