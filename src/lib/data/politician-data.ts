@@ -1,7 +1,7 @@
 // src/lib/data/politician-data.ts
 import type { Politician, Tag } from '@/types';
 import { calculateAge } from '@/lib/utils';
-import type { Database, Enums as SupabaseEnums } from '@/types/supabase'; // Added SupabaseEnums
+import type { Database, Enums as SupabaseEnums } from '@/types/supabase';
 
 // This file now primarily holds the transformation logic.
 // Data fetching is handled by src/lib/data-fetcher.ts
@@ -19,18 +19,9 @@ type RawPoliticianFromSupabase = Database['public']['Tables']['politicians']['Ro
       } | null; 
     } | null; 
   }[] | null; 
-  // politician_tags is removed, replaced by entity_tags
-  entity_tags: {
-    tag_id: number;
-    entity_type: SupabaseEnums<'entity_tag_type'>; // Using the enum type for entity_type
-    tag: { 
-      id: number; 
-      name: string; 
-      created_at: string | null; 
-    } | null; 
-  }[] | null;
+  // entity_tags is removed, replaced by fetched_tags
+  fetched_tags?: Tag[]; // Tags are now fetched separately and attached
   promises?: Array<Database['public']['Tables']['promises']['Row']>;
-  // directly_sponsored_bills was removed in a previous step
   political_career_entries?: Array<Database['public']['Tables']['political_career_entries']['Row']>;
   asset_declarations?: Array<Database['public']['Tables']['asset_declarations']['Row'] & { asset_declaration_sources: Array<Database['public']['Tables']['asset_declaration_sources']['Row']> }>;
   criminal_record_entries?: Array<Database['public']['Tables']['criminal_record_entries']['Row'] & { criminal_record_sources: Array<Database['public']['Tables']['criminal_record_sources']['Row']> }>;
@@ -79,7 +70,7 @@ export function transformSupabasePoliticianToAppPolitician(
   }
 
   return {
-    id: rawPol.id.toString(), // Politician.id is string
+    id: rawPol.id.toString(), 
     name: rawPol.name,
     party_id: activePartyId, 
     partyName: activePartyName,
@@ -98,25 +89,25 @@ export function transformSupabasePoliticianToAppPolitician(
     downvotes: rawPol.downvotes || 0,
     contactEmail: rawPol.contact_email,
     contactPhone: rawPol.contact_phone,
-    tags: rawPol.entity_tags?.map(et => et.tag ? { id: et.tag.id.toString(), name: et.tag.name, created_at: et.tag.created_at || undefined } : null).filter(Boolean) as Tag[] || [],
+    tags: rawPol.fetched_tags || [], // Use the pre-fetched and pre-transformed tags
     rating: ratingVal,
     promiseFulfillmentRate: promiseFulfillmentRate,
     highestConvictedSeverity: getHighestConvictedSeverity(rawPol.criminal_record_entries),
     created_at: rawPol.created_at,
     updated_at: rawPol.updated_at,
     politicalCareer: rawPol.political_career_entries?.map(pc => ({
-      id: pc.id.toString(), // Ensure string ID
+      id: pc.id.toString(), 
       year: pc.year,
       role: pc.role,
       created_at: pc.created_at,
       updated_at: pc.updated_at,
     })) || [],
     assetDeclarations: rawPol.asset_declarations?.map(ad => ({
-      id: ad.id.toString(), // Ensure string ID
+      id: ad.id.toString(), 
       summary: ad.summary,
       declarationDate: ad.declaration_date,
       sourceUrls: ad.asset_declaration_sources?.map(src => ({
-        id: src.id.toString(), // Ensure string ID
+        id: src.id.toString(), 
         value: src.url,
         description: src.description,
         created_at: src.created_at,
@@ -125,14 +116,14 @@ export function transformSupabasePoliticianToAppPolitician(
       updated_at: ad.updated_at,
     })) || [],
     criminalRecordEntries: rawPol.criminal_record_entries?.map(cr => ({
-      id: cr.id.toString(), // Ensure string ID
-      severity: cr.severity as CriminalRecordSeverity, // Cast to App type
-      status: cr.status as CriminalRecordStatus, // Cast to App type
-      offenseType: cr.offense_type as CriminalRecordOffenseType, // Cast to App type
+      id: cr.id.toString(), 
+      severity: cr.severity as CriminalRecordSeverity, 
+      status: cr.status as CriminalRecordStatus, 
+      offenseType: cr.offense_type as CriminalRecordOffenseType, 
       description: cr.description,
       caseDate: cr.case_date,
       sourceUrls: cr.criminal_record_sources?.map(src => ({
-        id: src.id.toString(), // Ensure string ID
+        id: src.id.toString(), 
         value: src.url,
         description: src.description,
         created_at: src.created_at,
@@ -141,7 +132,7 @@ export function transformSupabasePoliticianToAppPolitician(
       updated_at: cr.updated_at,
     })) || [],
     socialMediaLinks: rawPol.social_media_links?.map(sml => ({
-      id: sml.id.toString(), // Ensure string ID
+      id: sml.id.toString(), 
       platform: sml.platform,
       url: sml.url,
       created_at: sml.created_at,

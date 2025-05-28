@@ -1,10 +1,10 @@
 // src/lib/data-fetcher.ts
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/supabase';
-import type { EntityType, Politician, Party, UserPromise, Bill } from '@/types';
+import type { EntityType, Politician, Party, UserPromise, Bill, Tag } from '@/types'; // Added Tag
 import { transformSupabasePoliticianToAppPolitician } from '@/lib/data/politician-data';
-import { transformSupabasePartyToAppParty } from '@/app/api/parties/route'; // Corrected: Assuming it's exported
-import { transformSupabasePromiseToApp } from '@/app/api/promises/route'; // Assuming it's exported
+import { transformSupabasePartyToAppParty } from '@/app/api/parties/route'; 
+import { transformSupabasePromiseToApp } from '@/app/api/promises/route'; 
 import { transformSupabaseBillToApp } from '@/lib/data/bill-data';
 import { AppError } from './error-handling';
 
@@ -14,6 +14,13 @@ type EntityMap = {
   promise: UserPromise;
   bill: Bill;
 };
+
+const typeEnumMap = {
+    politician: 'Politician',
+    party: 'Party',
+    promise: 'Promise',
+    bill: 'LegislativeBill' 
+} as const;
 
 function getTableName(entityType: EntityType): keyof Database['public']['Tables'] {
   switch (entityType) {
@@ -27,27 +34,26 @@ function getTableName(entityType: EntityType): keyof Database['public']['Tables'
 
 function getSelectString(entityType: EntityType, includeRelations: boolean = true): string {
   if (!includeRelations) return '*';
+  // Tags (entity_tags) are now fetched separately in fetchEntityData
   switch (entityType) {
     case 'politician':
       return `*, 
               party_memberships(is_active, party_id, party:parties!inner(id, name, logo_asset_id, logo_details:media_assets!parties_logo_asset_id_fkey(storage_path))),
-              entity_tags(tag_id, entity_type, tag:tags!inner(id, name, created_at)),
               political_career_entries (*), 
               asset_declarations (*, asset_declaration_sources (*)), 
               criminal_record_entries (*, criminal_record_sources (*)), 
               social_media_links (*),
               promises:promises!politician_id(id, title, status, deadline, date_added) 
-              `; // Removed 'category' from promises join
+              `;
     case 'party':
       return `*, 
               chairperson_details:politicians!parties_chairperson_id_fkey (id, name, image_url), 
-              entity_tags(tag_id, entity_type, tag:tags!inner(id, name, created_at)),
+              logo_details:media_assets!parties_logo_asset_id_fkey(storage_path),
+              election_symbol_details:media_assets!parties_election_symbol_asset_id_fkey(storage_path),
               election_history_entries (*), 
               party_controversies (*, party_controversy_sources (*))
               `;
     case 'promise':
-      // `*` selects all columns from promises table. If 'category' doesn't exist, it won't be selected.
-      // No explicit 'category' was listed here for the main promise entity.
       return `*, 
               politician:politicians!promises_politician_id_fkey(
                   id, 
@@ -68,27 +74,27 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
                   name, 
                   logo_asset_id, 
                   logo_details:media_assets!parties_logo_asset_id_fkey(storage_path)
-              ), 
-              entity_tags(tag_id, entity_type, tag:tags!inner(id, name, created_at))
+              )
               `;
     case 'bill':
       return `*, 
-              parties!sponsor_party_id (id, name, logo_url), 
-              entity_tags(tag_id, entity_type, tag:tags!inner(id, name, created_at))
+              parties!sponsor_party_id (id, name, logo_url)
               `; 
     default: throw new AppError(`Invalid entity type for select string: ${entityType}`, 500, 'INVALID_ENTITY_TYPE');
   }
 }
 
-// A simplified filter applicator. More complex filtering might need specific logic per entity.
 function applyFilters(query: any, filters: Record<string, any>, entityType: EntityType): any {
   let newQuery = query;
   for (const key in filters) {
     if (filters[key] !== undefined && filters[key] !== null && filters[key] !== '') {
-      // Prevent filtering by 'category' for promises if it's passed in filters, as the column does not exist.
       if (key === 'category' && entityType === 'promise') {
         console.warn("Attempted to filter promises by 'category', but this column does not exist. Skipping filter.");
         continue; 
+      }
+      if (key === 'tag' && (entityType === 'politician' || entityType === 'party' || entityType === 'promise' || entityType === 'bill')) {
+        console.warn(`Filtering by tag for ${entityType} is not currently supported by this fetch method as tags are fetched separately. Filter ignored.`);
+        continue;
       }
 
       if (key === 'searchTerm') {
@@ -96,8 +102,6 @@ function applyFilters(query: any, filters: Record<string, any>, entityType: Enti
          newQuery = newQuery.ilike(searchField, `%${filters[key]}%`);
       } else if (key === 'isFeatured') {
          newQuery = newQuery.eq('is_featured', filters[key]);
-      } else if (key === 'tag' && (entityType === 'politician' || entityType === 'party' || entityType === 'promise' || entityType === 'bill')) {
-         newQuery = newQuery.eq('entity_tags.tag.name', filters[key]);
       } else if (key === 'minAge' && entityType === 'politician') {
         const minAge = parseInt(filters[key], 10);
         if (!isNaN(minAge) && minAge > 0) {
@@ -165,16 +169,7 @@ export async function fetchEntityData<T extends EntityType>(
     
     let query = supabase.from(tableName).select(selectString, { count: options.id ? undefined : 'exact' });
 
-    if (entityType === 'politician' || entityType === 'party' || entityType === 'promise' || entityType === 'bill') {
-        const typeEnumMap = {
-            politician: 'Politician',
-            party: 'Party',
-            promise: 'Promise',
-            bill: 'LegislativeBill' 
-        } as const; 
-        query = query.eq('entity_tags.entity_type', typeEnumMap[entityType]);
-    }
-
+    // Removed entity_tags.entity_type filter from main query as tags are fetched separately.
 
     if (options.id) {
       query = query.eq('id', options.id);
@@ -186,11 +181,8 @@ export async function fetchEntityData<T extends EntityType>(
 
     if (options.sortBy) {
       let actualField = options.sortBy.field;
-      // Prevent sorting by 'category' for promises as the column does not exist.
       if (entityType === 'promise' && options.sortBy.field === 'category') {
         console.warn("Attempted to sort promises by 'category', but this column does not exist. Skipping sort criteria.");
-        // Optionally, sort by a default field or remove sorting for this case
-        // For now, it will just not apply this specific sort. If no other sorts, order is default.
       } else {
         if (entityType === 'bill' && options.sortBy.field === 'proposalDate') actualField = 'proposal_date';
         if (entityType === 'promise' && options.sortBy.field === 'dateAdded') actualField = 'date_added';
@@ -211,7 +203,7 @@ export async function fetchEntityData<T extends EntityType>(
       query = query.range(from, to);
     }
 
-    const { data: rawData, error: dbError, count } = options.id 
+    let { data: rawData, error: dbError, count } = options.id 
         ? await query.single() 
         : await query;
 
@@ -221,6 +213,44 @@ export async function fetchEntityData<T extends EntityType>(
       }
       console.error(`Supabase error fetching ${entityType}:`, dbError);
       throw new AppError(dbError.message, 500, dbError.code, dbError.details);
+    }
+
+    // Fetch and attach tags separately
+    if (rawData && options.includeRelations && (entityType === 'politician' || entityType === 'party' || entityType === 'promise' || entityType === 'bill')) {
+        const entityIds = Array.isArray(rawData) ? rawData.map(e => (e as any).id) : [(rawData as any).id];
+        
+        if (entityIds.length > 0) {
+            const { data: tagsData, error: tagsError } = await supabase
+                .from('entity_tags')
+                .select('entity_id, tag:tags!inner(id, name, created_at)')
+                .eq('entity_type', typeEnumMap[entityType])
+                .in('entity_id', entityIds);
+
+            if (tagsError) {
+                console.error(`Error fetching tags for ${entityType}:`, tagsError);
+            } else if (tagsData) {
+                const tagsMap = new Map<string | number, Tag[]>();
+                for (const record of tagsData) {
+                    if (record.tag) {
+                        if (!tagsMap.has(record.entity_id)) {
+                            tagsMap.set(record.entity_id, []);
+                        }
+                        const appTag: Tag = {
+                            id: record.tag.id.toString(),
+                            name: record.tag.name,
+                            created_at: record.tag.created_at || undefined,
+                        };
+                        tagsMap.get(record.entity_id)!.push(appTag);
+                    }
+                }
+                
+                if (Array.isArray(rawData)) {
+                    rawData.forEach(e => (e as any).fetched_tags = tagsMap.get((e as any).id) || []);
+                } else {
+                    (rawData as any).fetched_tags = tagsMap.get((rawData as any).id) || [];
+                }
+            }
+        }
     }
 
     return { data: transformData(rawData, entityType), count, error: null };
