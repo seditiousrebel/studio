@@ -1,4 +1,3 @@
-
 "use client";
 
 import type { ReactNode } from 'react';
@@ -63,8 +62,8 @@ export function AppProviders({ children }: AppProvidersProps) {
     if (currentUser) {
       console.log(`[AppProviders] Fetching profile for user ID: ${currentUser.id}, email: ${currentUser.email}`);
       const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('is_admin, email, full_name')
+        .from('users') // Changed from 'profiles' to 'users'
+        .select('role, email, full_name, avatar_asset_id') // Changed select fields
         .eq('id', currentUser.id)
         .single();
       
@@ -76,11 +75,11 @@ export function AppProviders({ children }: AppProvidersProps) {
           userId: currentUser.id,
           profileEmail: profile.email, 
           profileFullName: profile.full_name,
-          profileIsAdminDb: profile.is_admin 
+          profileRole: profile.role // Changed from profileIsAdminDb: profile.is_admin
         });
-        setProfileIsAdmin(profile.is_admin || false);
+        setProfileIsAdmin(profile.role === 'Admin'); // Changed logic to use profile.role
       } else {
-        console.warn(`[AppProviders] No profile found in 'profiles' table for user ID: ${currentUser.id} (auth email: ${currentUser.email}). This can happen if the profile row wasn't created after signup. Admin status from DB will be false.`);
+        console.warn(`[AppProviders] No profile found in 'users' table for user ID: ${currentUser.id} (auth email: ${currentUser.email}). This can happen if the profile row wasn't created after signup. Admin status from DB will be false.`);
         setProfileIsAdmin(false);
       }
     } else {

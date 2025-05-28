@@ -1,4 +1,3 @@
-
 // src/lib/data-fetcher.ts
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/supabase';
@@ -31,7 +30,7 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
   switch (entityType) {
     case 'politician':
       return `*, 
-              party_details:parties!politicians_party_id_fkey (id, name, logo_url), 
+              party_memberships(is_active, party_id, party:parties(id, name, logo_asset_id, logo_details:media_assets(storage_path))),
               politician_tags (tags (id, name, created_at)), 
               political_career_entries (*), 
               asset_declarations (*, asset_declaration_sources (*)), 
@@ -45,17 +44,21 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
       // These are complex and might be better fetched in separate queries or through dedicated views for performance.
       // The current select focuses on direct relations for list/card views.
       return `*, 
-              chairperson_details:politicians!fk_parties_chairperson_id (id, name, image_url), 
+              chairperson_details:politicians!parties_chairperson_id_fkey (id, name, image_url), 
               party_tags (tags (id, name, created_at)), 
               election_history_entries (*), 
               party_controversies (*, party_controversy_sources (*))
               `;
     case 'promise':
+      // For promises, the existing party join for politicians might also be incorrect if that politician has moved parties.
+      // This should ideally also go via party_memberships if we need the politician's party at the time of the promise or current party.
+      // For now, leaving as is, but noting potential issue.
       return `*, 
               politicians!politician_id (id, name, image_url, party_id, party_details:parties!politicians_party_id_fkey (id, name, logo_url)), 
               parties!party_id (id, name, logo_url), 
               promise_tags (tags (id, name, created_at))`;
     case 'bill':
+      // Similar to promises, the politician's party details might be stale.
       return `*, 
               politicians!sponsor_politician_id (id, name, image_url, party_id, party_details:parties!politicians_party_id_fkey(id,name,logo_url)), 
               parties!sponsor_party_id (id, name, logo_url), 
@@ -75,6 +78,8 @@ function applyFilters(query: any, filters: Record<string, any>, entityType: Enti
       } else if (key === 'isFeatured') {
          newQuery = newQuery.eq('is_featured', filters[key]);
       } else if (key === 'tag' && entityType === 'politician') {
+         // This direct tag filter might need adjustment if tags are nested differently due to party_memberships changes.
+         // However, politician_tags is a direct relation to politicians, so it should still work.
          newQuery = newQuery.eq('politician_tags.tags.name', filters[key]);
       } else if (key === 'tag' && entityType === 'party') {
          newQuery = newQuery.eq('party_tags.tags.name', filters[key]);
@@ -92,15 +97,12 @@ function applyFilters(query: any, filters: Record<string, any>, entityType: Enti
       } else if (key === 'maxAge' && entityType === 'politician') {
         const maxAge = parseInt(filters[key], 10);
         if (!isNaN(maxAge) && maxAge > 0) {
-          // To be AT MOST maxAge, their (maxAge+1)-th birthday must not have occurred yet.
-          // So their birth date must be strictly after (Today - (maxAge+1) years).
-          // Which means date_of_birth >= (Today - (maxAge+1) years + 1 day)
           const boundaryBirthDateForMaxAgePlusOne = new Date();
           boundaryBirthDateForMaxAgePlusOne.setFullYear(boundaryBirthDateForMaxAgePlusOne.getFullYear() - (maxAge + 1));
-          boundaryBirthDateForMaxAgePlusOne.setDate(boundaryBirthDateForMaxAgePlusOne.getDate() + 1); // to make it inclusive for gte
+          boundaryBirthDateForMaxAgePlusOne.setDate(boundaryBirthDateForMaxAgePlusOne.getDate() + 1); 
           newQuery = newQuery.gte('date_of_birth', boundaryBirthDateForMaxAgePlusOne.toISOString().split('T')[0]);
         }
-      } else if (key.endsWith('Id')) { // e.g. partyId -> party_id
+      } else if (key.endsWith('Id')) { 
          newQuery = newQuery.eq(key.replace(/Id$/, '_id'), filters[key]);
       } else {
          newQuery = newQuery.eq(key, filters[key]);
@@ -122,16 +124,16 @@ function transformData(data: any, entityType: EntityType): any {
   if (!transformer) throw new AppError(`No transformer for entity type: ${entityType}`, 500, 'TRANSFORMATION_ERROR');
   
   if (Array.isArray(data)) {
-    return data.map(item => transformer(item as any)); // Cast needed as raw types vary
+    return data.map(item => transformer(item as any)); 
   }
-  return transformer(data as any); // Cast needed
+  return transformer(data as any); 
 }
 
 
 interface FetchEntityDataOptions {
   id?: string;
   includeRelations?: boolean;
-  filters?: Record<string, any>; // e.g., { searchTerm: '...', partyId: '...', isFeatured: true }
+  filters?: Record<string, any>; 
   page?: number;
   limit?: number;
   sortBy?: { field: string; order: 'asc' | 'desc' };
@@ -162,16 +164,14 @@ export async function fetchEntityData<T extends EntityType>(
 
     if (options.sortBy) {
       let actualField = options.sortBy.field;
-      // Handle specific field name mappings if necessary
       if (entityType === 'bill' && options.sortBy.field === 'proposalDate') actualField = 'proposal_date';
       if (entityType === 'promise' && options.sortBy.field === 'dateAdded') actualField = 'date_added';
       if (entityType === 'party' && options.sortBy.field === 'foundingDate') actualField = 'founding_date';
-      if (options.sortBy.field === 'rating') actualField = 'upvotes'; // Example for sorting by rating via upvotes
-      if (options.sortBy.field === 'age' && entityType === 'politician') actualField = 'date_of_birth'; // Sort by date_of_birth for age
+      if (options.sortBy.field === 'rating') actualField = 'upvotes'; 
+      if (options.sortBy.field === 'age' && entityType === 'politician') actualField = 'date_of_birth'; 
 
       query = query.order(actualField, { 
         ascending: options.sortBy.order === 'asc',
-        // For age, ascending age means descending birth date.
         nullsFirst: options.sortBy.field === 'age' ? (options.sortBy.order === 'desc') : undefined 
       });
     }
@@ -187,7 +187,7 @@ export async function fetchEntityData<T extends EntityType>(
         : await query;
 
     if (dbError) {
-      if (dbError.code === 'PGRST116' && options.id) { // Single record not found
+      if (dbError.code === 'PGRST116' && options.id) { 
         throw AppError.notFound(`${entityType}`);
       }
       console.error(`Supabase error fetching ${entityType}:`, dbError);
@@ -204,4 +204,3 @@ export async function fetchEntityData<T extends EntityType>(
     return { data: null, error: new AppError(error.message || `Failed to fetch ${entityType}`, 500, 'UNEXPECTED_FETCH_ERROR') };
   }
 }
-
