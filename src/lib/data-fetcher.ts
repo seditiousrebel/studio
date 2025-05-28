@@ -30,39 +30,52 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
   switch (entityType) {
     case 'politician':
       return `*, 
-              party_memberships(is_active, party_id, party:parties(id, name, logo_asset_id, logo_details:media_assets(storage_path))),
-              politician_tags (tags (id, name, created_at)), 
+              party_memberships(is_active, party_id, party:parties!inner(id, name, logo_asset_id, logo_details:media_assets!parties_logo_asset_id_fkey(storage_path))),
+              entity_tags(tag_id, entity_type, tag:tags!inner(id, name, created_at)),
               political_career_entries (*), 
               asset_declarations (*, asset_declaration_sources (*)), 
               criminal_record_entries (*, criminal_record_sources (*)), 
               social_media_links (*),
-              promises:promises!politician_id(id, title, status, category, deadline, date_added),
-              directly_sponsored_bills:bills!sponsor_politician_id(id, title, status, proposal_date, registration_number)
-              `;
+              promises:promises!politician_id(id, title, status, deadline, date_added) 
+              `; // Removed 'category' from promises join
     case 'party':
-      // For Party detail, we often need member politicians, platform promises, member promises, bills by party, bills by members.
-      // These are complex and might be better fetched in separate queries or through dedicated views for performance.
-      // The current select focuses on direct relations for list/card views.
       return `*, 
               chairperson_details:politicians!parties_chairperson_id_fkey (id, name, image_url), 
-              party_tags (tags (id, name, created_at)), 
+              entity_tags(tag_id, entity_type, tag:tags!inner(id, name, created_at)),
               election_history_entries (*), 
               party_controversies (*, party_controversy_sources (*))
               `;
     case 'promise':
-      // For promises, the existing party join for politicians might also be incorrect if that politician has moved parties.
-      // This should ideally also go via party_memberships if we need the politician's party at the time of the promise or current party.
-      // For now, leaving as is, but noting potential issue.
+      // `*` selects all columns from promises table. If 'category' doesn't exist, it won't be selected.
+      // No explicit 'category' was listed here for the main promise entity.
       return `*, 
-              politicians!politician_id (id, name, image_url, party_id, party_details:parties!politicians_party_id_fkey (id, name, logo_url)), 
-              parties!party_id (id, name, logo_url), 
-              promise_tags (tags (id, name, created_at))`;
+              politician:politicians!promises_politician_id_fkey(
+                  id, 
+                  name, 
+                  image_url, 
+                  party_memberships(
+                      is_active, 
+                      party:parties!inner(
+                          id, 
+                          name, 
+                          logo_asset_id, 
+                          logo_details:media_assets!parties_logo_asset_id_fkey(storage_path)
+                      )
+                  )
+              ), 
+              party:parties!promises_party_id_fkey(
+                  id, 
+                  name, 
+                  logo_asset_id, 
+                  logo_details:media_assets!parties_logo_asset_id_fkey(storage_path)
+              ), 
+              entity_tags(tag_id, entity_type, tag:tags!inner(id, name, created_at))
+              `;
     case 'bill':
-      // Similar to promises, the politician's party details might be stale.
       return `*, 
-              politicians!sponsor_politician_id (id, name, image_url, party_id, party_details:parties!politicians_party_id_fkey(id,name,logo_url)), 
               parties!sponsor_party_id (id, name, logo_url), 
-              bill_tags (tags (id, name, created_at))`;
+              entity_tags(tag_id, entity_type, tag:tags!inner(id, name, created_at))
+              `; 
     default: throw new AppError(`Invalid entity type for select string: ${entityType}`, 500, 'INVALID_ENTITY_TYPE');
   }
 }
@@ -72,21 +85,19 @@ function applyFilters(query: any, filters: Record<string, any>, entityType: Enti
   let newQuery = query;
   for (const key in filters) {
     if (filters[key] !== undefined && filters[key] !== null && filters[key] !== '') {
+      // Prevent filtering by 'category' for promises if it's passed in filters, as the column does not exist.
+      if (key === 'category' && entityType === 'promise') {
+        console.warn("Attempted to filter promises by 'category', but this column does not exist. Skipping filter.");
+        continue; 
+      }
+
       if (key === 'searchTerm') {
          const searchField = filters.searchField || (entityType === 'politician' || entityType === 'party' ? 'name' : 'title');
          newQuery = newQuery.ilike(searchField, `%${filters[key]}%`);
       } else if (key === 'isFeatured') {
          newQuery = newQuery.eq('is_featured', filters[key]);
-      } else if (key === 'tag' && entityType === 'politician') {
-         // This direct tag filter might need adjustment if tags are nested differently due to party_memberships changes.
-         // However, politician_tags is a direct relation to politicians, so it should still work.
-         newQuery = newQuery.eq('politician_tags.tags.name', filters[key]);
-      } else if (key === 'tag' && entityType === 'party') {
-         newQuery = newQuery.eq('party_tags.tags.name', filters[key]);
-      } else if (key === 'tag' && entityType === 'promise') {
-         newQuery = newQuery.eq('promise_tags.tags.name', filters[key]);
-      } else if (key === 'tag' && entityType === 'bill') {
-         newQuery = newQuery.eq('bill_tags.tags.name', filters[key]);
+      } else if (key === 'tag' && (entityType === 'politician' || entityType === 'party' || entityType === 'promise' || entityType === 'bill')) {
+         newQuery = newQuery.eq('entity_tags.tag.name', filters[key]);
       } else if (key === 'minAge' && entityType === 'politician') {
         const minAge = parseInt(filters[key], 10);
         if (!isNaN(minAge) && minAge > 0) {
@@ -154,6 +165,17 @@ export async function fetchEntityData<T extends EntityType>(
     
     let query = supabase.from(tableName).select(selectString, { count: options.id ? undefined : 'exact' });
 
+    if (entityType === 'politician' || entityType === 'party' || entityType === 'promise' || entityType === 'bill') {
+        const typeEnumMap = {
+            politician: 'Politician',
+            party: 'Party',
+            promise: 'Promise',
+            bill: 'LegislativeBill' 
+        } as const; 
+        query = query.eq('entity_tags.entity_type', typeEnumMap[entityType]);
+    }
+
+
     if (options.id) {
       query = query.eq('id', options.id);
     }
@@ -164,16 +186,23 @@ export async function fetchEntityData<T extends EntityType>(
 
     if (options.sortBy) {
       let actualField = options.sortBy.field;
-      if (entityType === 'bill' && options.sortBy.field === 'proposalDate') actualField = 'proposal_date';
-      if (entityType === 'promise' && options.sortBy.field === 'dateAdded') actualField = 'date_added';
-      if (entityType === 'party' && options.sortBy.field === 'foundingDate') actualField = 'founding_date';
-      if (options.sortBy.field === 'rating') actualField = 'upvotes'; 
-      if (options.sortBy.field === 'age' && entityType === 'politician') actualField = 'date_of_birth'; 
+      // Prevent sorting by 'category' for promises as the column does not exist.
+      if (entityType === 'promise' && options.sortBy.field === 'category') {
+        console.warn("Attempted to sort promises by 'category', but this column does not exist. Skipping sort criteria.");
+        // Optionally, sort by a default field or remove sorting for this case
+        // For now, it will just not apply this specific sort. If no other sorts, order is default.
+      } else {
+        if (entityType === 'bill' && options.sortBy.field === 'proposalDate') actualField = 'proposal_date';
+        if (entityType === 'promise' && options.sortBy.field === 'dateAdded') actualField = 'date_added';
+        if (entityType === 'party' && options.sortBy.field === 'foundingDate') actualField = 'founding_date';
+        if (options.sortBy.field === 'rating') actualField = 'upvotes'; 
+        if (options.sortBy.field === 'age' && entityType === 'politician') actualField = 'date_of_birth'; 
 
-      query = query.order(actualField, { 
-        ascending: options.sortBy.order === 'asc',
-        nullsFirst: options.sortBy.field === 'age' ? (options.sortBy.order === 'desc') : undefined 
-      });
+        query = query.order(actualField, { 
+          ascending: options.sortBy.order === 'asc',
+          nullsFirst: options.sortBy.field === 'age' ? (options.sortBy.order === 'desc') : undefined 
+        });
+      }
     }
 
     if (options.page && options.limit && !options.id) {

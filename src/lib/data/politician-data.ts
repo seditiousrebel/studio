@@ -1,32 +1,36 @@
 // src/lib/data/politician-data.ts
 import type { Politician, Tag } from '@/types';
 import { calculateAge } from '@/lib/utils';
-import type { Database } from '@/types/supabase';
+import type { Database, Enums as SupabaseEnums } from '@/types/supabase'; // Added SupabaseEnums
 
 // This file now primarily holds the transformation logic.
 // Data fetching is handled by src/lib/data-fetcher.ts
 
 type RawPoliticianFromSupabase = Database['public']['Tables']['politicians']['Row'] & {
-  // party_details is removed as party info now comes via party_memberships
   party_memberships: {
     is_active: boolean;
-    party_id: number; // This is the FK from party_memberships to parties table (parties.id)
-    party: { // This is the expanded party record from the parties table
+    party_id: number; 
+    party: { 
       id: number;
       name: string;
       logo_asset_id: number | null;
-      logo_details: { // This comes from the media_assets table
+      logo_details: { 
         storage_path: string | null; 
       } | null; 
-    } | null; // The nested party object could be null if the join failed or party_id was invalid (though unlikely with good DB integrity)
-  }[] | null; // The party_memberships array itself can be null or empty
-  politician_tags: {
-    tags: Pick<Database['public']['Tables']['tags']['Row'], 'id' | 'name' | 'created_at'> | null;
-  }[];
+    } | null; 
+  }[] | null; 
+  // politician_tags is removed, replaced by entity_tags
+  entity_tags: {
+    tag_id: number;
+    entity_type: SupabaseEnums<'entity_tag_type'>; // Using the enum type for entity_type
+    tag: { 
+      id: number; 
+      name: string; 
+      created_at: string | null; 
+    } | null; 
+  }[] | null;
   promises?: Array<Database['public']['Tables']['promises']['Row']>;
-  directly_sponsored_bills?: Array<Database['public']['Tables']['bills']['Row']>;
-  // party_sponsored_bills seems to have been removed from the select string, if it was there.
-  // If it needs to be added back, the select string in data-fetcher.ts for politician would need adjustment.
+  // directly_sponsored_bills was removed in a previous step
   political_career_entries?: Array<Database['public']['Tables']['political_career_entries']['Row']>;
   asset_declarations?: Array<Database['public']['Tables']['asset_declarations']['Row'] & { asset_declaration_sources: Array<Database['public']['Tables']['asset_declaration_sources']['Row']> }>;
   criminal_record_entries?: Array<Database['public']['Tables']['criminal_record_entries']['Row'] & { criminal_record_sources: Array<Database['public']['Tables']['criminal_record_sources']['Row']> }>;
@@ -66,30 +70,26 @@ export function transformSupabasePoliticianToAppPolitician(
     );
 
     if (activeMembership && activeMembership.party) {
-      activePartyId = activeMembership.party.id.toString(); // Politician.party_id is string | null
+      activePartyId = activeMembership.party.id.toString(); 
       activePartyName = activeMembership.party.name;
       if (activeMembership.party.logo_details && activeMembership.party.logo_details.storage_path) {
         activePartyLogoStoragePath = activeMembership.party.logo_details.storage_path;
-        // IMPORTANT: activePartyLogoStoragePath is just the path, not a full URL.
-        // It needs to be prefixed with the Supabase storage public URL.
-        // e.g., `https://<PROJECT_URL>/storage/v1/object/public/<BUCKET_NAME>/${activePartyLogoStoragePath}`
-        // This prefixing should ideally happen where the URL is consumed (e.g., in a component or a utility function).
       }
     }
   }
 
   return {
-    id: rawPol.id,
+    id: rawPol.id.toString(), // Politician.id is string
     name: rawPol.name,
-    party_id: activePartyId, // Use the ID from the active membership's party object
+    party_id: activePartyId, 
     partyName: activePartyName,
-    partyLogoUrl: activePartyLogoStoragePath, // This is now a storage path, see comment above
+    partyLogoUrl: activePartyLogoStoragePath, 
     province: rawPol.province,
     constituency: rawPol.constituency,
     bio: rawPol.bio,
     dateOfBirth: rawPol.date_of_birth,
     age: rawPol.date_of_birth ? calculateAge(rawPol.date_of_birth) : undefined,
-    imageUrl: rawPol.image_url, // This should also be a storage path if served from Supabase storage
+    imageUrl: rawPol.image_url, 
     data_ai_hint: rawPol.data_ai_hint,
     position: rawPol.position,
     education: rawPol.education,
@@ -98,25 +98,25 @@ export function transformSupabasePoliticianToAppPolitician(
     downvotes: rawPol.downvotes || 0,
     contactEmail: rawPol.contact_email,
     contactPhone: rawPol.contact_phone,
-    tags: rawPol.politician_tags?.map(pt => pt.tags ? { id: pt.tags.id, name: pt.tags.name, created_at: pt.tags.created_at } : null).filter(Boolean) as Tag[] || [],
+    tags: rawPol.entity_tags?.map(et => et.tag ? { id: et.tag.id.toString(), name: et.tag.name, created_at: et.tag.created_at || undefined } : null).filter(Boolean) as Tag[] || [],
     rating: ratingVal,
     promiseFulfillmentRate: promiseFulfillmentRate,
     highestConvictedSeverity: getHighestConvictedSeverity(rawPol.criminal_record_entries),
     created_at: rawPol.created_at,
     updated_at: rawPol.updated_at,
     politicalCareer: rawPol.political_career_entries?.map(pc => ({
-      id: pc.id,
+      id: pc.id.toString(), // Ensure string ID
       year: pc.year,
       role: pc.role,
       created_at: pc.created_at,
       updated_at: pc.updated_at,
     })) || [],
     assetDeclarations: rawPol.asset_declarations?.map(ad => ({
-      id: ad.id,
+      id: ad.id.toString(), // Ensure string ID
       summary: ad.summary,
       declarationDate: ad.declaration_date,
       sourceUrls: ad.asset_declaration_sources?.map(src => ({
-        id: src.id,
+        id: src.id.toString(), // Ensure string ID
         value: src.url,
         description: src.description,
         created_at: src.created_at,
@@ -125,14 +125,14 @@ export function transformSupabasePoliticianToAppPolitician(
       updated_at: ad.updated_at,
     })) || [],
     criminalRecordEntries: rawPol.criminal_record_entries?.map(cr => ({
-      id: cr.id,
-      severity: cr.severity,
-      status: cr.status,
-      offenseType: cr.offense_type,
+      id: cr.id.toString(), // Ensure string ID
+      severity: cr.severity as CriminalRecordSeverity, // Cast to App type
+      status: cr.status as CriminalRecordStatus, // Cast to App type
+      offenseType: cr.offense_type as CriminalRecordOffenseType, // Cast to App type
       description: cr.description,
       caseDate: cr.case_date,
       sourceUrls: cr.criminal_record_sources?.map(src => ({
-        id: src.id,
+        id: src.id.toString(), // Ensure string ID
         value: src.url,
         description: src.description,
         created_at: src.created_at,
@@ -141,15 +141,19 @@ export function transformSupabasePoliticianToAppPolitician(
       updated_at: cr.updated_at,
     })) || [],
     socialMediaLinks: rawPol.social_media_links?.map(sml => ({
-      id: sml.id,
+      id: sml.id.toString(), // Ensure string ID
       platform: sml.platform,
       url: sml.url,
       created_at: sml.created_at,
       updated_at: sml.updated_at,
     })) || [],
-    // These are typically fetched separately or as part of more detailed views, ensure select string matches if needed here.
     promises: [], 
     directlySponsoredBills: [], 
     partySponsoredBills: [], 
   };
 }
+
+// Helper types from src/types/index.ts for casting if not already imported/available
+type CriminalRecordSeverity = typeof import('@/types').CRIMINAL_RECORD_SEVERITIES[number];
+type CriminalRecordStatus = typeof import('@/types').CRIMINAL_RECORD_STATUSES[number];
+type CriminalRecordOffenseType = typeof import('@/types').CRIMINAL_RECORD_OFFENSE_TYPES[number];
