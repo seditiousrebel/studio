@@ -40,7 +40,6 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
       return `*, 
               party_memberships(is_active, party_id, party:parties!inner(id, name, logo_asset_id, logo_details:media_assets!parties_logo_asset_id_fkey(storage_path))),
               politician_career_entries (*), 
-              social_media_links (*),
               promises:promises!politician_id(id, title, status, deadline, date_added) 
               `;
     case 'party':
