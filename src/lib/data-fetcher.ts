@@ -40,7 +40,6 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
       return `*, 
               party_memberships(is_active, party_id, party:parties!inner(id, name, logo_asset_id, logo_details:media_assets!parties_logo_asset_id_fkey(storage_path))),
               politician_career_entries (*), 
-              criminal_record_entries (*, criminal_record_sources (*)), 
               social_media_links (*),
               promises:promises!politician_id(id, title, status, deadline, date_added) 
               `;
@@ -181,10 +180,23 @@ export async function fetchEntityData<T extends EntityType>(
       if (entityType === 'promise' && options.sortBy.field === 'category') {
         console.warn("Attempted to sort promises by 'category', but this column does not exist. Skipping sort criteria.");
       } else {
-        if (entityType === 'bill' && options.sortBy.field === 'proposalDate') actualField = 'proposal_date';
-        if (entityType === 'promise' && options.sortBy.field === 'dateAdded') actualField = 'date_added';
+        if (entityType === 'bill' && options.sortBy.field === 'proposalDate') actualField = 'introduced_date';
+        if (entityType === 'promise' && options.sortBy.field === 'dateAdded') actualField = 'created_at';
         if (entityType === 'party' && options.sortBy.field === 'foundingDate') actualField = 'founding_date';
-        if (options.sortBy.field === 'rating') actualField = 'upvotes'; 
+        // START OF REVISED RATING SORT LOGIC
+        if (options.sortBy.field === 'rating') {
+          if (entityType === 'party') {
+            console.warn("Sorting parties by 'rating' is not currently supported at the database level as 'upvotes' column doesn't exist. Defaulting to sort by 'name'.");
+            actualField = 'name'; 
+          } else if (entityType === 'politician') {
+            console.warn("Sorting politicians by 'rating' is not directly supported by this field in 'fetchEntityData'. Defaulting to sort by 'name'. Consider using 'politician_ratings' table for sorting.");
+            actualField = 'name';
+          } else {
+            console.warn(`Sorting by 'rating' for entityType '${entityType}' using 'upvotes' field is not generically supported. Defaulting to sort by primary key or 'name' if available.`);
+            actualField = 'id'; // Or 'name' if 'name' is guaranteed. 'id' is safest.
+          }
+        }
+        // END OF REVISED RATING SORT LOGIC
         if (options.sortBy.field === 'age' && entityType === 'politician') actualField = 'date_of_birth'; 
 
         query = query.order(actualField, { 
