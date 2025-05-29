@@ -40,7 +40,6 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
       return `*, 
               party_memberships(is_active, party_id, party:parties!inner(id, name, logo_asset_id, logo_details:media_assets!parties_logo_asset_id_fkey(storage_path))),
               politician_career_entries (*), 
-              asset_declarations (*, asset_declaration_sources (*)), 
               criminal_record_entries (*, criminal_record_sources (*)), 
               social_media_links (*),
               promises:promises!politician_id(id, title, status, deadline, date_added) 
@@ -50,8 +49,7 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
               chairperson_details:politicians!parties_chairperson_id_fkey (id, name, photo_details:media_assets!politicians_photo_asset_id_fkey(storage_path)), 
               logo_details:media_assets!parties_logo_asset_id_fkey(storage_path),
               election_symbol_details:media_assets!parties_election_symbol_asset_id_fkey(storage_path),
-              party_election_results (*), 
-              party_controversies (*, party_controversy_sources (*))
+              party_election_results (*)
               `;
     case 'promise':
       return `*, 
@@ -99,7 +97,8 @@ function applyFilters(query: any, filters: Record<string, any>, entityType: Enti
          const searchField = filters.searchField || (entityType === 'politician' || entityType === 'party' ? 'name' : 'title');
          newQuery = newQuery.ilike(searchField, `%${filters[key]}%`);
       } else if (key === 'isFeatured') {
-         newQuery = newQuery.eq('is_featured', filters[key]);
+        console.warn(`Filtering by 'isFeatured' directly on entity tables is not supported in 'applyFilters'. Use the 'featured_content' table to determine featured items. Skipping 'isFeatured' filter for entityType '${entityType}'.`);
+        // No query modification, effectively skipping the filter.
       } else if (key === 'minAge' && entityType === 'politician') {
         const minAge = parseInt(filters[key], 10);
         if (!isNaN(minAge) && minAge > 0) {
