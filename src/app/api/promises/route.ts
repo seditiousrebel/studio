@@ -57,7 +57,7 @@ export function transformSupabasePromiseToApp(raw: RawSupabasePromise): UserProm
     deadline: raw.deadline,
     sourceUrl: raw.source_url,
     evidenceUrl: raw.evidence_url,
-    dateAdded: raw.date_added,
+    dateAdded: raw.created_at,
     politicianId: raw.politicians?.id?.toString() || undefined, 
     politicianName: raw.politicians?.name || undefined,
     politicianImageUrl: raw.politicians?.photo_details?.storage_path || undefined,

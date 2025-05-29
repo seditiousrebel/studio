@@ -31,12 +31,13 @@ type RawSupabaseParty = Database['public']['Tables']['parties']['Row'] & {
 };
 
 export function transformSupabasePartyToAppParty(rawParty: RawSupabaseParty): Party {
-  const totalVotes = (rawParty.upvotes || 0) + (rawParty.downvotes || 0);
-  let ratingVal: number | undefined = 2.5; 
-  if (totalVotes > 0) {
-    ratingVal = parseFloat(((((rawParty.upvotes || 0) / totalVotes) * 4.5 + 0.5).toFixed(1)));
-    ratingVal = Math.max(0.5, Math.min(5, ratingVal || 0)); 
-  }
+  // TODO: Calculate real upvotes, downvotes, and rating from entity_votes table.
+  const totalVotes = 0; // Placeholder until entity_votes integration
+  let ratingVal: number | undefined = undefined; // Placeholder
+  // if (totalVotes > 0) { // Old block for rating calculation
+  //   ratingVal = parseFloat(((((rawParty.upvotes || 0) / totalVotes) * 4.5 + 0.5).toFixed(1)));
+  //   ratingVal = Math.max(0.5, Math.min(5, ratingVal || 0)); 
+  // }
 
   return {
     id: rawParty.id.toString(), 
@@ -58,8 +59,8 @@ export function transformSupabasePartyToAppParty(rawParty: RawSupabaseParty): Pa
     contactEmail: rawParty.contact_email,
     contactPhone: rawParty.contact_phone,
     isFeatured: rawParty.is_featured || false,
-    upvotes: rawParty.upvotes || 0,
-    downvotes: rawParty.downvotes || 0,
+    upvotes: 0, // Placeholder
+    downvotes: 0, // Placeholder
     rating: ratingVal,
     tags: rawParty.fetched_tags || [], // Use fetched_tags
     electionHistory: (rawParty.election_history_entries || []).map((eh): ElectionHistoryEntry => ({
