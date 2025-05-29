@@ -12,7 +12,7 @@ import { AppError } from '@/lib/error-handling';
 import { ITEMS_PER_PAGE } from '@/lib/constants';
 
 type RawSupabaseParty = Database['public']['Tables']['parties']['Row'] & {
-  chairperson_details: Pick<Database['public']['Tables']['politicians']['Row'], 'id' | 'name' | 'image_url'> | null;
+  chairperson_details: (Pick<Database['public']['Tables']['politicians']['Row'], 'id' | 'name'> & { photo_details: { storage_path: string | null } | null; }) | null;
   // entity_tags is removed, replaced by fetched_tags
   fetched_tags?: Tag[];
   logo_details?: { storage_path: string | null } | null;
@@ -48,7 +48,7 @@ export function transformSupabasePartyToAppParty(rawParty: RawSupabaseParty): Pa
     foundingDate: rawParty.founding_date,
     chairpersonId: rawParty.chairperson_details?.id?.toString() || rawParty.chairperson_id?.toString() || undefined, 
     chairpersonName: rawParty.chairperson_details?.name,
-    chairpersonImageUrl: rawParty.chairperson_details?.image_url,
+    chairpersonImageUrl: rawParty.chairperson_details?.photo_details?.storage_path || undefined,
     headquarters: rawParty.headquarters,
     description: rawParty.description,
     history: rawParty.history,

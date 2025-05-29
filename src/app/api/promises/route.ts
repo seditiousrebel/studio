@@ -13,7 +13,8 @@ import { AppError } from '@/lib/error-handling';
 // import { promiseFormSchema } from '@/components/admin/promise-form'; // Not used in this file directly
 
 type RawSupabasePromise = Database['public']['Tables']['promises']['Row'] & {
-  politicians: (Omit<Database['public']['Tables']['politicians']['Row'], 'party_id'> & {
+  politicians: (Omit<Database['public']['Tables']['politicians']['Row'], 'party_id' | 'photo_asset_id'> & { // Assuming photo_asset_id is also directly on politicians table
+    photo_details: { storage_path: string | null } | null; // Added this
     party_memberships: {
       is_active: boolean;
       party: {
@@ -59,7 +60,7 @@ export function transformSupabasePromiseToApp(raw: RawSupabasePromise): UserProm
     dateAdded: raw.date_added,
     politicianId: raw.politicians?.id?.toString() || undefined, 
     politicianName: raw.politicians?.name || undefined,
-    politicianImageUrl: raw.politicians?.image_url || undefined,
+    politicianImageUrl: raw.politicians?.photo_details?.storage_path || undefined,
     
     partyId: raw.politicians ? politicianPartyId : (raw.parties?.id?.toString() || undefined),
     partyName: raw.politicians ? politicianPartyName : (raw.parties?.name || undefined),

@@ -17,6 +17,7 @@ import { Card as SkeletonCard, CardContent as SkeletonCardContent, CardHeader as
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { PlusCircle, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useAuth } from '@/components/layout/app-providers';
 import { ITEMS_PER_PAGE } from '@/lib/constants';
 import { ROUTES } from '@/lib/routes';

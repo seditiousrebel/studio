@@ -63,7 +63,7 @@ export default async function BillsPage({
 
       allFilterOptions.politicianOptions = await getPoliticianOptions(supabase);
       allFilterOptions.partyOptions = await getPartyOptions(supabase);
-      allFilterOptions.billTagOptions = (await getExistingTags(supabase, 'bill_tags')).map(tag => ({ value: tag, label: tag }));
+      allFilterOptions.billTagOptions = (await getExistingTags(supabase, 'LegislativeBill')).map(tag => ({ value: tag, label: tag }));
       allFilterOptions.billStatusOptions = BILL_STATUSES.map(status => ({ value: status, label: status }));
 
     } catch (e: any) {

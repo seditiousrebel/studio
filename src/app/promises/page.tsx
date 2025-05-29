@@ -62,7 +62,7 @@ export default async function PromisesPage({
     allFilterOptions.politicianOptions = await getPoliticianOptions(supabase);
     allFilterOptions.partyOptions = await getPartyOptions(supabase);
     allFilterOptions.categoryOptions = (await getExistingPromiseCategories(supabase)).map(cat => ({ value: cat, label: cat }));
-    allFilterOptions.promiseTagOptions = (await getExistingTags(supabase, 'promise_tags')).map(tag => ({ value: tag, label: tag }));
+    allFilterOptions.promiseTagOptions = (await getExistingTags(supabase, 'Promise')).map(tag => ({ value: tag, label: tag }));
     allFilterOptions.promiseStatusOptions = PROMISE_STATUSES.map(status => ({ value: status, label: status }));
 
   } catch (e: any) {

@@ -65,7 +65,7 @@ export default async function PoliticiansPage({
     // Prepare options for FilterControls
     allFilterOptions.partyOptions = await getPartyOptions(supabase);
     allFilterOptions.provinceOptions = getProvinceFilterOptions(); 
-    allFilterOptions.politicianTagOptions = (await getExistingTags(supabase, 'politician_tags')).map(tag => ({ value: tag, label: tag }));
+    allFilterOptions.politicianTagOptions = (await getExistingTags(supabase, 'Politician')).map(tag => ({ value: tag, label: tag }));
     
     if (initialPoliticians.length > 0) {
         const ages = initialPoliticians.map(p => p.age).filter(age => age !== undefined && age !== null && age >= 0) as number[];

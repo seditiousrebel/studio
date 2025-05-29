@@ -27,7 +27,7 @@ function getTableName(entityType: EntityType): keyof Database['public']['Tables'
     case 'politician': return 'politicians';
     case 'party': return 'parties';
     case 'promise': return 'promises';
-    case 'bill': return 'bills';
+    case 'bill': return 'legislative_bills';
     default: throw new AppError(`Invalid entity type for table name: ${entityType}`, 500, 'INVALID_ENTITY_TYPE');
   }
 }
@@ -39,7 +39,7 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
     case 'politician':
       return `*, 
               party_memberships(is_active, party_id, party:parties!inner(id, name, logo_asset_id, logo_details:media_assets!parties_logo_asset_id_fkey(storage_path))),
-              political_career_entries (*), 
+              politician_career_entries (*), 
               asset_declarations (*, asset_declaration_sources (*)), 
               criminal_record_entries (*, criminal_record_sources (*)), 
               social_media_links (*),
@@ -47,10 +47,10 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
               `;
     case 'party':
       return `*, 
-              chairperson_details:politicians!parties_chairperson_id_fkey (id, name, image_url), 
+              chairperson_details:politicians!parties_chairperson_id_fkey (id, name, photo_details:media_assets!politicians_photo_asset_id_fkey(storage_path)), 
               logo_details:media_assets!parties_logo_asset_id_fkey(storage_path),
               election_symbol_details:media_assets!parties_election_symbol_asset_id_fkey(storage_path),
-              election_history_entries (*), 
+              party_election_results (*), 
               party_controversies (*, party_controversy_sources (*))
               `;
     case 'promise':
@@ -58,7 +58,7 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
               politician:politicians!promises_politician_id_fkey(
                   id, 
                   name, 
-                  image_url, 
+                  photo_details:media_assets!politicians_photo_asset_id_fkey(storage_path), 
                   party_memberships(
                       is_active, 
                       party:parties!inner(
@@ -77,9 +77,7 @@ function getSelectString(entityType: EntityType, includeRelations: boolean = tru
               )
               `;
     case 'bill':
-      return `*, 
-              parties!sponsor_party_id (id, name, logo_url)
-              `; 
+      return `*`; 
     default: throw new AppError(`Invalid entity type for select string: ${entityType}`, 500, 'INVALID_ENTITY_TYPE');
   }
 }
