@@ -1,4 +1,3 @@
-
 // src/lib/data/bill-data.ts
 import type { Bill, Tag } from '@/types';
 import type { Database } from '@/types/supabase';
@@ -7,25 +6,16 @@ import type { Database } from '@/types/supabase';
 // Data fetching is handled by src/lib/data-fetcher.ts
 
 type RawSupabaseBill = Database['public']['Tables']['bills']['Row'] & {
-  politicians: (Pick<Database['public']['Tables']['politicians']['Row'], 'id' | 'name' | 'image_url' | 'party_id'> & {
-    party_details: Pick<Database['public']['Tables']['parties']['Row'], 'id' | 'name' | 'logo_url'> | null;
-  }) | null;
-  parties: Pick<Database['public']['Tables']['parties']['Row'], 'id' | 'name' | 'logo_url'> | null;
-  bill_tags: Array<{
-    tags: Pick<Database['public']['Tables']['tags']['Row'], 'id' | 'name' | 'created_at'> | null;
-  }>;
+  // politicians and parties (direct sponsor joins) are removed.
+  // bill_tags is removed, replaced by fetched_tags.
+  fetched_tags?: Tag[]; // Tags are now fetched separately and attached.
+  // Note: The `sponsorship_details` JSON column is part of `Database['public']['Tables']['bills']['Row']`
+  // and can be used here if more complex sponsor parsing is needed in the future.
 };
 
 export function transformSupabaseBillToApp(rawBill: RawSupabaseBill): Bill {
-  let sponsorPoliticianPartyName: string | undefined = undefined;
-  let sponsorPoliticianPartyId: string | undefined = undefined;
-  let sponsorPoliticianPartyLogoUrl: string | undefined = undefined;
-
-  if (rawBill.politicians && rawBill.politicians.party_details) {
-    sponsorPoliticianPartyName = rawBill.politicians.party_details.name ?? undefined;
-    sponsorPoliticianPartyId = rawBill.politicians.party_details.id ?? undefined;
-    sponsorPoliticianPartyLogoUrl = rawBill.politicians.party_details.logo_url ?? undefined;
-  }
+  // Logic for deriving party details from rawBill.politicians is removed
+  // as rawBill.politicians is no longer directly joined.
 
   const totalVotes = (rawBill.upvotes ?? 0) + (rawBill.downvotes ?? 0);
   let ratingVal: number | undefined = 2.5;
@@ -35,7 +25,7 @@ export function transformSupabaseBillToApp(rawBill: RawSupabaseBill): Bill {
   }
 
   return {
-    id: rawBill.id,
+    id: rawBill.id.toString(), // Changed to string
     title: rawBill.title,
     registrationNumber: rawBill.registration_number,
     registrationDate: rawBill.registration_date,
@@ -44,22 +34,25 @@ export function transformSupabaseBillToApp(rawBill: RawSupabaseBill): Bill {
     proposalDate: rawBill.proposal_date,
     summary: rawBill.summary,
     dataAiHint: rawBill.data_ai_hint,
-    sponsorPoliticianId: rawBill.sponsor_politician_id || undefined,
-    sponsorPoliticianName: rawBill.politicians?.name || undefined,
-    sponsorPoliticianPartyName: sponsorPoliticianPartyName,
-    sponsorPoliticianPartyId: sponsorPoliticianPartyId,
-    sponsorPoliticianPartyLogoUrl: sponsorPoliticianPartyLogoUrl,
-    sponsorPartyId: rawBill.sponsor_party_id || undefined,
-    sponsorPartyName: rawBill.parties?.name || undefined,
-    sponsorPartyLogoUrl: rawBill.parties?.logo_url || undefined,
+    
+    // Sponsor fields that were derived from direct joins are now undefined.
+    // The IDs are still available directly from rawBill if needed.
+    sponsorPoliticianId: rawBill.sponsor_politician_id?.toString() || undefined, // Convert to string
+    sponsorPoliticianName: undefined, // Removed rawBill.politicians?.name
+    sponsorPoliticianPartyName: undefined, // Removed derived logic
+    sponsorPoliticianPartyId: undefined, // Removed derived logic
+    sponsorPoliticianPartyLogoUrl: undefined, // Removed derived logic
+    
+    sponsorPartyId: rawBill.sponsor_party_id?.toString() || undefined, // Convert to string
+    sponsorPartyName: undefined, // Removed rawBill.parties?.name
+    sponsorPartyLogoUrl: undefined, // Removed rawBill.parties?.logo_url
+    
     parliamentInfoUrl: rawBill.parliament_info_url,
     isFeatured: rawBill.is_featured ?? false,
     upvotes: rawBill.upvotes ?? 0,
     downvotes: rawBill.downvotes ?? 0,
     rating: ratingVal,
-    tags: rawBill.bill_tags
-      ?.map(bt => bt.tags ? { id: bt.tags.id, name: bt.tags.name, created_at: bt.tags.created_at } : null)
-      .filter(Boolean) as Tag[] || [],
+    tags: rawBill.fetched_tags || [], // Use the pre-fetched and pre-transformed tags
     created_at: rawBill.created_at,
     updated_at: rawBill.updated_at,
   };

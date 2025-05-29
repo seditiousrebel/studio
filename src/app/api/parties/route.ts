@@ -10,27 +10,19 @@ import { fetchEntityData } from '@/lib/data-fetcher';
 import { handleCreateParty } from '@/lib/api-handlers/party-handlers';
 import { AppError } from '@/lib/error-handling';
 import { ITEMS_PER_PAGE } from '@/lib/constants';
-// import { partyFormSchema } from '@/components/admin/party-form'; // Not used in this file directly
 
 type RawSupabaseParty = Database['public']['Tables']['parties']['Row'] & {
   chairperson_details: Pick<Database['public']['Tables']['politicians']['Row'], 'id' | 'name' | 'image_url'> | null;
-  // party_tags is removed, replaced by entity_tags
-  entity_tags: {
-    tag_id: number;
-    entity_type: SupabaseEnums<'entity_type'>; // As per instruction, using 'entity_type' enum
-    tag: { 
-      id: number; 
-      name: string; 
-      created_at: string | null; 
-    } | null; 
-  }[] | null;
+  // entity_tags is removed, replaced by fetched_tags
+  fetched_tags?: Tag[];
+  logo_details?: { storage_path: string | null } | null;
+  election_symbol_details?: { storage_path: string | null } | null;
   election_history_entries: Array<Database['public']['Tables']['election_history_entries']['Row']>;
   party_controversies: Array<
     Database['public']['Tables']['party_controversies']['Row'] & {
       party_controversy_sources: Array<Database['public']['Tables']['party_controversy_sources']['Row']> | null;
     }
   >;
-  // These are not directly fetched by default by fetchEntityData('party',...) unless select string is expanded
   member_politicians?: Politician[]; 
   platform_promises?: UserPromise[];
   member_promises?: UserPromise[];
@@ -47,20 +39,20 @@ export function transformSupabasePartyToAppParty(rawParty: RawSupabaseParty): Pa
   }
 
   return {
-    id: rawParty.id.toString(), // Changed to string
+    id: rawParty.id.toString(), 
     name: rawParty.name,
     shortName: rawParty.short_name,
-    logoUrl: rawParty.logo_url, // This should be updated if it's now a storage path from media_assets
+    logoUrl: rawParty.logo_details?.storage_path || undefined, // Use storage_path
     dataAiHint: rawParty.data_ai_hint,
     ideology: rawParty.ideology,
     foundingDate: rawParty.founding_date,
-    chairpersonId: rawParty.chairperson_details?.id?.toString() || rawParty.chairperson_id?.toString() || undefined, // Changed to string
+    chairpersonId: rawParty.chairperson_details?.id?.toString() || rawParty.chairperson_id?.toString() || undefined, 
     chairpersonName: rawParty.chairperson_details?.name,
     chairpersonImageUrl: rawParty.chairperson_details?.image_url,
     headquarters: rawParty.headquarters,
     description: rawParty.description,
     history: rawParty.history,
-    electionSymbolUrl: rawParty.election_symbol_url,
+    electionSymbolUrl: rawParty.election_symbol_details?.storage_path || undefined, // Use storage_path
     dataAiHintSymbol: rawParty.data_ai_hint_symbol,
     website: rawParty.website,
     contactEmail: rawParty.contact_email,
@@ -69,10 +61,10 @@ export function transformSupabasePartyToAppParty(rawParty: RawSupabaseParty): Pa
     upvotes: rawParty.upvotes || 0,
     downvotes: rawParty.downvotes || 0,
     rating: ratingVal,
-    tags: rawParty.entity_tags?.map(et => et.tag ? { id: et.tag.id.toString(), name: et.tag.name, created_at: et.tag.created_at || undefined } : null).filter(Boolean) as Tag[] || [],
-    electionHistory: (rawParty.election_history_entries || []).map((eh): ElectionHistoryEntry => ({ // Added explicit return type
-      id: eh.id.toString(), // Changed to string
-      party_id: eh.party_id?.toString(), // Ensure party_id is also string if present
+    tags: rawParty.fetched_tags || [], // Use fetched_tags
+    electionHistory: (rawParty.election_history_entries || []).map((eh): ElectionHistoryEntry => ({
+      id: eh.id.toString(), 
+      party_id: eh.party_id?.toString(), 
       electionYear: eh.election_year,
       electionType: eh.election_type as ElectionEventType,
       seatsContested: eh.seats_contested,
@@ -81,12 +73,12 @@ export function transformSupabasePartyToAppParty(rawParty: RawSupabaseParty): Pa
       created_at: eh.created_at,
       updated_at: eh.updated_at,
     })),
-    controversies: (rawParty.party_controversies || []).map((c): ControversyEntry => ({ // Added explicit return type
-      id: c.id.toString(), // Changed to string
+    controversies: (rawParty.party_controversies || []).map((c): ControversyEntry => ({ 
+      id: c.id.toString(), 
       description: c.description,
-      eventDate: c.controversy_date, // Assuming this maps to eventDate
-      sourceUrls: (c.party_controversy_sources || []).map((s): ControversySource => ({ // Added explicit return type
-        id: s.id.toString(), // Changed to string
+      eventDate: c.controversy_date, 
+      sourceUrls: (c.party_controversy_sources || []).map((s): ControversySource => ({ 
+        id: s.id.toString(), 
         value: s.url,
         description: s.description,
         created_at: s.created_at,
@@ -97,7 +89,6 @@ export function transformSupabasePartyToAppParty(rawParty: RawSupabaseParty): Pa
     keyPolicyPositions: rawParty.key_policy_positions,
     created_at: rawParty.created_at,
     updated_at: rawParty.updated_at,
-    // Optional fields, if not expanded in select, they will be undefined and default to []
     memberPoliticians: rawParty.member_politicians || [], 
     platformPromises: rawParty.platform_promises || [],
     memberPromises: rawParty.member_promises || [],
@@ -118,7 +109,7 @@ export async function GET(request: NextRequest) {
   const filters: Record<string, any> = {
       searchTerm: searchParams.get('search'),
       ideology: searchParams.get('ideology'),
-      foundingYear: searchParams.get('foundingYear'), // This would need specific handling in applyFilters for date part
+      foundingYear: searchParams.get('foundingYear'), 
       tag: searchParams.get('tag'),
   };
   Object.keys(filters).forEach(key => (filters[key] === null || filters[key] === undefined || filters[key] === '') && delete filters[key]);
@@ -154,7 +145,6 @@ export async function POST(request: NextRequest) {
     const supabase = createClient(cookieStore);
     try {
         const json = await request.json();
-        // Assuming partyFormSchema is used within handleCreateParty for validation
         const newParty = await handleCreateParty(json, supabase);
         return NextResponse.json(newParty, { status: 201 });
 

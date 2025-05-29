@@ -27,16 +27,8 @@ type RawSupabasePromise = Database['public']['Tables']['promises']['Row'] & {
   parties: (Pick<Database['public']['Tables']['parties']['Row'], 'id' | 'name' | 'logo_asset_id'> & {
     logo_details: { storage_path: string | null } | null;
   }) | null;
-  // promise_tags is removed, replaced by entity_tags
-  entity_tags: {
-    tag_id: number;
-    entity_type: SupabaseEnums<'entity_type'>; // Using the enum type for entity_type
-    tag: { 
-      id: number; 
-      name: string; 
-      created_at: string | null; 
-    } | null; 
-  }[] | null;
+  // entity_tags is removed, replaced by fetched_tags
+  fetched_tags?: Tag[]; // Tags are now fetched separately and attached
 };
 
 export function transformSupabasePromiseToApp(raw: RawSupabasePromise): UserPromise {
@@ -56,16 +48,16 @@ export function transformSupabasePromiseToApp(raw: RawSupabasePromise): UserProm
   }
 
   return {
-    id: raw.id.toString(), // Changed to string
+    id: raw.id.toString(), 
     title: raw.title,
     description: raw.description,
     status: raw.status as UserPromise['status'],
-    category: undefined, // Set to undefined as category column is removed
+    category: undefined, 
     deadline: raw.deadline,
     sourceUrl: raw.source_url,
     evidenceUrl: raw.evidence_url,
     dateAdded: raw.date_added,
-    politicianId: raw.politicians?.id?.toString() || undefined, // Changed to string
+    politicianId: raw.politicians?.id?.toString() || undefined, 
     politicianName: raw.politicians?.name || undefined,
     politicianImageUrl: raw.politicians?.image_url || undefined,
     
@@ -74,7 +66,7 @@ export function transformSupabasePromiseToApp(raw: RawSupabasePromise): UserProm
     partyLogoUrl: raw.politicians ? politicianPartyLogoUrl : (raw.parties?.logo_details?.storage_path || undefined),
     
     isFeatured: raw.is_featured ?? false,
-    tags: raw.entity_tags?.map(et => et.tag ? { id: et.tag.id.toString(), name: et.tag.name, created_at: et.tag.created_at || undefined } : null).filter(Boolean) as Tag[] || [],
+    tags: raw.fetched_tags || [], // Use the pre-fetched and pre-transformed tags
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   };
@@ -93,7 +85,6 @@ export async function GET(request: NextRequest) {
     const filters: Record<string, any> = {
         searchTerm: searchParams.get('search'),
         status: searchParams.get('status'),
-        // category: searchParams.get('category'), // Category filter removed
         politicianId: searchParams.get('politician'),
         partyId: searchParams.get('party'),
         tag: searchParams.get('tag'),
@@ -104,7 +95,6 @@ export async function GET(request: NextRequest) {
     let sortBy;
     if (sortByParam) {
         const [field, order] = sortByParam.split('_');
-        // Category sorting removed in data-fetcher, no specific check needed here for that.
         sortBy = { field, order: order as 'asc' | 'desc' };
     }
 
@@ -134,7 +124,6 @@ export async function POST(request: NextRequest) {
     const supabase = createClient(cookieStore);
     try {
         const json = await request.json();
-        // Assuming promiseFormSchema is used within handleCreatePromise for validation
         const newPromise = await handleCreatePromise(json, supabase);
         return NextResponse.json(newPromise, { status: 201 });
 
